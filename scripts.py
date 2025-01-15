@@ -1,12 +1,16 @@
 from contextlib import asynccontextmanager
-from shutil import which
-from typing import Annotated, Dict, Any
+from datetime import datetime, UTC
+from typing import Annotated, Dict, Any, List
 import httpx
-from fastapi import FastAPI, Query, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from fastapi import FastAPI, Path, HTTPException, Depends, Query
+from fastapi.params import Depends
+from pydantic import BaseModel, Field
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, select
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from starlette import status
 
 DATABASE_URL = "sqlite+aiosqlite:///./weather.db"
 engine = create_async_engine(DATABASE_URL, echo = True)
@@ -29,7 +33,7 @@ class City(Base):
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, prymary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)
 
 class UserCity(Base):
@@ -44,10 +48,10 @@ class Weather(Base):
     temperature = Column(Float)
     wind_speed = Column(Float)
     pressure = Column(Float)
-    timestamp = Column(Float)
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC))
 
 @asynccontextmanager
-async def lifespan():
+async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -56,8 +60,32 @@ async def lifespan():
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
-        
-app = FastAPI()
+
+app = FastAPI(lifespan=lifespan)
+
+async def validate_user_id(
+    user_id: Annotated[int, Path(ge=1, description="ID пользователя должен быть положительным числом")]
+) -> int:
+
+    if user_id < 1:
+        raise HTTPException(status_code=400, detail="ID пользователя должен быть положительным числом")
+    return user_id
+
+class UserCreate(BaseModel):
+    username: str
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+
+class CityCreate(BaseModel):
+    name: str
+    latitude: float = Field(ge=-90, le=90, description="Широта должна быть в диапазоне от -90 до 90")
+    longitude: float = Field(ge=-180, le=180, description="Долгота должна быть в диапазоне от -180 до 180")
+
+class CityResponse(BaseModel):
+    id: int
+    name: str
 
 class WeatherResponse(BaseModel):
     latitude: float
@@ -114,6 +142,109 @@ async def get_current_weather(latitude: float, longitude: float) -> Dict[str, An
                 status_code=500, detail=f"Произошла ошибка: {str(e)}"
             )
 
+@app.post(
+    "/users",
+    response_model=UserResponse,
+    summary="Создание нового пользователя",
+    description="""
+    Этот эндпоинт позволяет создать нового пользователя в системе.
+
+    - **username**: Уникальное имя пользователя.
+    - **email**: Электронная почта пользователя.
+    - **password**: Пароль пользователя.
+
+    Если пользователь с таким именем уже существует, возвращается ошибка 400.
+    """,
+    response_description="Возвращает данные созданного пользователя",
+)
+async def create_user(user: UserCreate, db: AsyncSession = Depends(get_db)):
+    db_user = User(**user.model_dump())
+    db.add(db_user)
+    try:
+        await db.commit()
+        await db.refresh(db_user)
+        return db_user
+    except IntegrityError:
+        await db.rollback()  # Откатываем транзакцию
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Пользователь с таким именем уже существует",
+        )
+
+@app.post(
+    "/users/{user_id}/cities/add",
+    summary="Добавить город для пользователя",
+    description="Добавляет город в список отслеживаемых городов пользователя. "
+                "Если город уже существует, связь между пользователем и городом не создается.",
+    response_description="Сообщение о результате операции",
+    responses={
+        200: {"description": "Город успешно добавлен или уже связан с пользователем"},
+        404: {"description": "Пользователь не найден"},
+    },
+)
+async def add_city_for_user(
+    city: CityCreate,
+    user_id: int = Depends(validate_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # Проверяем, существует ли пользователь
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Проверяем, существует ли город
+    db_city = await db.execute(select(City).where(City.name == city.name))
+    db_city = db_city.scalar_one_or_none()
+    if not db_city:
+        # Если города нет, создаем его
+        db_city = City(**city.model_dump())
+        db.add(db_city)
+        await db.commit()
+        await db.refresh(db_city)
+
+    # Пытаемся добавить связь между пользователем и городом
+    stmt = (
+        insert(UserCity)
+        .values(user_id=user_id, city_id=db_city.id)
+        .on_conflict_do_nothing()
+    )
+    result = await db.execute(stmt)
+    await db.commit()
+
+    # Проверяем, была ли добавлена связь
+    if result.rowcount == 0:
+        return {"message": "City is already linked to the user"}
+
+    return {"message": "City added to user"}
+
+@app.get(
+    "/users/{user_id}/cities/",
+    response_model=List[CityResponse],
+    summary="Получить список городов пользователя",
+    description="Возвращает список всех городов, связанных с указанным пользователем.",
+    response_description="Список городов пользователя",
+)
+async def get_user_cities(
+    user_id: int = Depends(validate_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    # Проверяем, существует ли пользователь
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Получаем города пользователя
+    result = await db.execute(
+        select(City)
+        .join(UserCity, City.id == UserCity.city_id)
+        .where(UserCity.user_id == user_id)
+    )
+    cities = result.scalars().all()
+
+    if not cities:
+        raise HTTPException(status_code=404, detail="No cities found for this user")
+
+    return cities
 
 # Эндпоинт для получения текущей погоды
 @app.get("/weather/current-conditions", response_model=WeatherResponse)
@@ -147,8 +278,3 @@ async def current_weather(
         wind_speed=current["windspeed"],
         pressure=pressure if pressure is not None else 0  # Если давление недоступно, возвращаем 0 или None
     )
-
-@app.get("/")
-def main():
-    return {"d":
-            "d"}
