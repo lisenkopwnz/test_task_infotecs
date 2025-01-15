@@ -1,11 +1,62 @@
+from contextlib import asynccontextmanager
+from shutil import which
 from typing import Annotated, Dict, Any
 import httpx
 from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
 
+DATABASE_URL = "sqlite+aiosqlite:///./weather.db"
+engine = create_async_engine(DATABASE_URL, echo = True)
 
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    autoflush=False,
+    autocommit =False,
+)
 
+Base = declarative_base()
 
+class City(Base):
+    __tablename__ = "cities"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, prymary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False)
+
+class UserCity(Base):
+    __tablename__ = "user_cities"
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    city_id = Column(Integer, ForeignKey("cities.id"), primary_key=True)
+
+class Weather(Base):
+    __tablename__ = "weather"
+    id = Column(Integer, primary_key=True, index=True)
+    city_id = Column(Integer, ForeignKey("cities.id"))
+    temperature = Column(Float)
+    wind_speed = Column(Float)
+    pressure = Column(Float)
+    timestamp = Column(Float)
+
+@asynccontextmanager
+async def lifespan():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+        
 app = FastAPI()
 
 class WeatherResponse(BaseModel):
