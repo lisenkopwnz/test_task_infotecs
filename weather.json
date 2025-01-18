@@ -1,1 +1,148 @@
-{}
+{
+    "1": {
+        "2025-01-19T00:00": {
+            "temperature": -25.9,
+            "humidity": 77,
+            "wind_speed": 24.8,
+            "precipitation": 0.0
+        },
+        "2025-01-19T01:00": {
+            "temperature": -25.6,
+            "humidity": 77,
+            "wind_speed": 24.2,
+            "precipitation": 0.0
+        },
+        "2025-01-19T02:00": {
+            "temperature": -25.4,
+            "humidity": 77,
+            "wind_speed": 24.5,
+            "precipitation": 0.0
+        },
+        "2025-01-19T03:00": {
+            "temperature": -25.1,
+            "humidity": 77,
+            "wind_speed": 24.7,
+            "precipitation": 0.0
+        },
+        "2025-01-19T04:00": {
+            "temperature": -24.9,
+            "humidity": 77,
+            "wind_speed": 24.7,
+            "precipitation": 0.0
+        },
+        "2025-01-19T05:00": {
+            "temperature": -24.6,
+            "humidity": 77,
+            "wind_speed": 24.9,
+            "precipitation": 0.0
+        },
+        "2025-01-19T06:00": {
+            "temperature": -24.4,
+            "humidity": 78,
+            "wind_speed": 24.8,
+            "precipitation": 0.0
+        },
+        "2025-01-19T07:00": {
+            "temperature": -24.1,
+            "humidity": 78,
+            "wind_speed": 24.7,
+            "precipitation": 0.0
+        },
+        "2025-01-19T08:00": {
+            "temperature": -23.9,
+            "humidity": 78,
+            "wind_speed": 24.0,
+            "precipitation": 0.0
+        },
+        "2025-01-19T09:00": {
+            "temperature": -23.7,
+            "humidity": 78,
+            "wind_speed": 23.4,
+            "precipitation": 0.0
+        },
+        "2025-01-19T10:00": {
+            "temperature": -23.5,
+            "humidity": 78,
+            "wind_speed": 23.4,
+            "precipitation": 0.0
+        },
+        "2025-01-19T11:00": {
+            "temperature": -23.2,
+            "humidity": 78,
+            "wind_speed": 23.3,
+            "precipitation": 0.0
+        },
+        "2025-01-19T12:00": {
+            "temperature": -23.0,
+            "humidity": 78,
+            "wind_speed": 23.3,
+            "precipitation": 0.0
+        },
+        "2025-01-19T13:00": {
+            "temperature": -22.8,
+            "humidity": 78,
+            "wind_speed": 23.4,
+            "precipitation": 0.0
+        },
+        "2025-01-19T14:00": {
+            "temperature": -22.6,
+            "humidity": 79,
+            "wind_speed": 23.2,
+            "precipitation": 0.0
+        },
+        "2025-01-19T15:00": {
+            "temperature": -22.5,
+            "humidity": 79,
+            "wind_speed": 23.4,
+            "precipitation": 0.0
+        },
+        "2025-01-19T16:00": {
+            "temperature": -22.4,
+            "humidity": 79,
+            "wind_speed": 23.3,
+            "precipitation": 0.0
+        },
+        "2025-01-19T17:00": {
+            "temperature": -22.2,
+            "humidity": 79,
+            "wind_speed": 23.5,
+            "precipitation": 0.0
+        },
+        "2025-01-19T18:00": {
+            "temperature": -22.2,
+            "humidity": 79,
+            "wind_speed": 24.2,
+            "precipitation": 0.0
+        },
+        "2025-01-19T19:00": {
+            "temperature": -22.1,
+            "humidity": 79,
+            "wind_speed": 24.5,
+            "precipitation": 0.0
+        },
+        "2025-01-19T20:00": {
+            "temperature": -22.0,
+            "humidity": 79,
+            "wind_speed": 24.1,
+            "precipitation": 0.0
+        },
+        "2025-01-19T21:00": {
+            "temperature": -22.0,
+            "humidity": 79,
+            "wind_speed": 23.8,
+            "precipitation": 0.0
+        },
+        "2025-01-19T22:00": {
+            "temperature": -22.0,
+            "humidity": 79,
+            "wind_speed": 24.5,
+            "precipitation": 0.0
+        },
+        "2025-01-19T23:00": {
+            "temperature": -22.0,
+            "humidity": 79,
+            "wind_speed": 24.1,
+            "precipitation": 0.0
+        }
+    }
+}

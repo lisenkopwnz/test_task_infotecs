@@ -1,1 +1,8 @@
-{}
+{
+    "1": {
+        "username": "string",
+        "cities": [
+            "1"
+        ]
+    }
+}
