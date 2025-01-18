@@ -1,40 +1,30 @@
 import asyncio
-import time
-from datetime import datetime, timezone, timedelta
+import logging
+from datetime import datetime, timezone, timedelta, time
 from typing import Dict, Any
-import httpx
-from fastapi import HTTPException, Depends
-from typing import Dict, Any
+
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import select, delete
-from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from starlette import status
+from zoneinfo import ZoneInfo
 
-from database import AsyncSessionLocal
-from dependencies import get_db
-from models import Weather, City, User
+from file_handlers import save_data, load_data, WEATHER_FILE, CITIES_FILE
 
+logger = logging.getLogger(__name__)
 
-async def get_user_or_404(db: AsyncSession, user_id: int) :
+async def get_or_404(user_id: int, users_data: Dict[str, Any]):
     """
-    Получает пользователя по его ID из базы данных.
-    Если пользователь с данным ID не существует, вызывает исключение 404.
+    Проверяем существует ли польователь в базе данных
     """
-    stmt = select(User).where(User.id == user_id)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+    if str(user_id) not in users_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден",
+        )
 
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Такого пользователя нет")
-
-async def save_weather_forecast(db: AsyncSession, city_id: int, weather_data: Dict[str, Any]):
+async def save_weather_forecast(city_id: str, weather_data: Dict[str, Any]):
     """
-    Сохраняет прогноз погоды в таблицу Weather.
+    Сохраняет прогноз погоды в файл weather.json.
     """
     hourly_data = weather_data.get("hourly", {})
     times = hourly_data.get("time", [])
@@ -43,76 +33,21 @@ async def save_weather_forecast(db: AsyncSession, city_id: int, weather_data: Di
     wind_speeds = hourly_data.get("windspeed_10m", [])
     precipitations = hourly_data.get("precipitation", [])
 
-    # Создаём список записей для сохранения
-    weather_records = []
+    # Загружаем текущие данные о погоде
+    weather = await load_data(WEATHER_FILE)
+
+    # Создаем записи о погоде для города
+    weather[city_id] = {}
     for i in range(len(times)):
-        forecast_time = datetime.fromisoformat(times[i])
-        weather_record = Weather(
-            city_id=city_id,
-            forecast_time=forecast_time,
-            temperature=temperatures[i],
-            humidity=humidities[i],
-            wind_speed=wind_speeds[i],
-            precipitation=precipitations[i],
-        )
-        weather_records.append(weather_record)
-
-    # Сохраняем все записи за один раз
-    db.add_all(weather_records)
-    await db.commit()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-async def delete_old_weather_data(db: AsyncSession):
-    try:
-        current_time = datetime.now(timezone.utc)
-        stmt = delete(Weather).where(Weather.forecast_time < current_time)
-        await db.execute(stmt)
-        await db.commit()
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise
-    except Exception as e:
-        raise
-
-async def update_weather_data(db: AsyncSession = Depends(get_db)):
-    cities = await db.execute(select(City))
-    cities = cities.scalars().all()
-    for city in cities:
-        weather_data = await get_current_weather(city.latitude, city.longitude)
-
-        hourly_data = weather_data["hourly"]
-        for i in range(len(hourly_data["time"])):
-            forecast_time = datetime.fromisoformat(hourly_data["time"][i])
-            weather = Weather(
-                city_id=city.id,
-                forecast_time=forecast_time,
-                temperature=hourly_data["temperature_2m"][i],
-                humidity=hourly_data["relativehumidity_2m"][i],
-                wind_speed=hourly_data["windspeed_10m"][i],
-                precipitation=hourly_data["precipitation"][i],
-                timestamp=datetime.now(timezone.utc)
-            )
-            db.add(weather)
-        await db.commit()
-
-    await asyncio.sleep(900)
-
-
+        forecast_time = times[i]  # Время прогноза (строка в формате ISO)
+        weather[city_id][forecast_time] = {
+            "temperature": temperatures[i],
+            "humidity": humidities[i],
+            "wind_speed": wind_speeds[i],
+            "precipitation": precipitations[i],
+        }
+    # Сохраняем обновленные данные
+    await save_data(WEATHER_FILE, weather)
 
 async def get_current_weather(latitude: float, longitude: float) -> Dict[str, Any]:
     """
@@ -123,7 +58,7 @@ async def get_current_weather(latitude: float, longitude: float) -> Dict[str, An
         "latitude": latitude,
         "longitude": longitude,
         "current_weather": True,
-        "hourly": "temperature_2m,relativehumidity_2m,pressure_msl,windspeed_10m,precipitation",   # Добавлен relativehumidity_2m
+        "hourly": "temperature_2m,relativehumidity_2m,pressure_msl,windspeed_10m,precipitation",
         "forecast_days": 1,
         "timezone": "auto",
     }
@@ -151,7 +86,75 @@ async def get_current_weather(latitude: float, longitude: float) -> Dict[str, An
                 detail=f"Произошла ошибка: {str(e)}"
             )
 
-#def round_to_nearest_hour(target_time: time) -> time:
+async def update_weather_data():
+    """
+    Обновляет данные о погоде для всех городов каждые 15 минут.
+    """
+    while True:
+        # Загружаем данные о городах
+        cities = await load_data(CITIES_FILE)
+
+        # Загружаем данные о погоде
+        weather_data = await load_data(WEATHER_FILE)
+
+        # Удаляем старые записи (старше 24 часов)
+        await delete_old_weather_data(weather_data, cities)
+
+        # Обновляем данные для каждого города
+        for city_id, city_info in cities.items():
+            latitude = city_info["latitude"]
+            longitude = city_info["longitude"]
+
+            try:
+                # Получаем данные о погоде
+                current_weather = await get_current_weather(latitude, longitude)
+
+                # Обновляем данные в json
+                if city_id not in weather_data:
+                    weather_data[city_id] = {}
+
+                hourly_data = current_weather["hourly"]
+                for i in range(len(hourly_data["time"])):
+                    timestamp = hourly_data["time"][i]
+                    weather_data[city_id][timestamp] = {
+                        "temperature": hourly_data["temperature_2m"][i],
+                        "humidity": hourly_data["relativehumidity_2m"][i],
+                        "wind_speed": hourly_data["windspeed_10m"][i],
+                        "precipitation": hourly_data["precipitation"][i]
+                    }
+
+            except Exception as e:
+                logger.info(f"Ошибка при обновлении данных для города {city_id}: {e}")
+
+        # Сохраняем данные
+        await save_data(WEATHER_FILE, weather_data)
+
+        # Ждем 15 минут перед следующим обновлением
+        await asyncio.sleep(900)
+
+async def delete_old_weather_data(weather_data: Dict[str, Any], cities: Dict[str, Any]):
+    """
+    Удаляет записи о погоде, которые старше 24 часов.
+    """
+    now_utc = datetime.now(timezone.utc)  # Текущее время в UTC
+
+    for city_id, city_weather in weather_data.items():
+        # Получаем временную метку города
+        city_timezone = ZoneInfo(cities[city_id]["timezone"])
+
+        # Создаем копию словаря
+        for timestamp in list(city_weather.keys()):
+            # Преобразуем локальное время в объект datetime с временной меткой
+            local_time = datetime.fromisoformat(timestamp).replace(tzinfo=city_timezone)
+
+            # Преобразуем локальное время в UTC
+            utc_time = local_time.astimezone(timezone.utc)
+
+            # Удаляем записи, старше 24 часов
+            if (now_utc - utc_time) > timedelta(hours=24):
+                del city_weather[timestamp]
+
+def round_to_nearest_hour(target_time: time) -> time:
     """
     Округляет время до ближайшего часа.
     Например:
@@ -160,14 +163,14 @@ async def get_current_weather(latitude: float, longitude: float) -> Dict[str, An
     - 23:45 -> 00:00
     """
     # Преобразуем time в datetime для удобства вычислений
-    #dummy_date = datetime(1, 1, 1)  # Фиктивная дата
-    #full_datetime = datetime.combine(dummy_date, target_time)
+    dummy_date = datetime(1, 1, 1)  # Фиктивная дата
+    full_datetime = datetime.combine(dummy_date, target_time)
 
     # Округляем
-    #if full_datetime.minute >= 30:
-        #rounded_datetime = full_datetime.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-    #else:
-        #rounded_datetime = full_datetime.replace(minute=0, second=0, microsecond=0)
+    if full_datetime.minute >= 30:
+        rounded_datetime = full_datetime.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        rounded_datetime = full_datetime.replace(minute=0, second=0, microsecond=0)
 
     # Возвращаем только время
-    #return rounded_datetime.time()
+    return rounded_datetime.time()
